@@ -1,0 +1,5 @@
+# SUBSTITUIR por versoes fixas (o modelo.joblib depende da versao do scikit-learn):
+#   pip freeze | grep -iE "^(numpy|pandas|scikit-learn|joblib|scipy)==" > requirements.txt
+pandas
+scikit-learn
+joblib

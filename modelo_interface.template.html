@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Análise do modelo — Steel Plates Faults</title>
+<style>
+  :root { --bg:#ffffff; --fg:#1b2333; --mut:#5b6678; --card:#f3f5f9; --bd:#d6dce8; --ac:#1c5fb8; --bad:#b3261e; --ok:#1b7a46; --rev:#9a6100; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161f; --fg:#e8ecf4; --mut:#9aa6ba; --card:#1b2130; --bd:#2c3547; --ac:#7db0ff; --bad:#ff8f86; --ok:#74d9a0; --rev:#ffc766; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--fg);
+         max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem; line-height: 1.45; }
+  h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; }
+  p.sub { color: var(--mut); margin: 0 0 1rem; }
+  .painel { background: var(--card); border: 1px solid var(--bd); border-radius: 10px; padding: .9rem 1rem; }
+  .controles { display: grid; grid-template-columns: 1fr 1fr 140px; gap: 1rem; align-items: end; }
+  .controles label { display: block; font-size: .85rem; color: var(--mut); margin-bottom: .2rem; }
+  .controles input[type=range] { width: 100%; }
+  .controles input[type=number] { width: 100%; padding: .3rem; background: var(--bg); color: var(--fg); border: 1px solid var(--bd); border-radius: 6px; }
+  .valor { font-weight: 700; color: var(--ac); }
+  button { padding: .45rem .7rem; border-radius: 6px; border: 1px solid var(--bd); background: var(--bg); color: var(--fg); cursor: pointer; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; margin-top: .9rem; }
+  .card { background: var(--card); border: 1px solid var(--bd); border-radius: 10px; padding: .8rem 1rem; }
+  .card .n { font-size: 1.9rem; font-weight: 700; }
+  .card .l { color: var(--mut); font-size: .85rem; }
+  .ajustar .n { color: var(--ok); } .nao .n { color: var(--ac); } .revisao .n { color: var(--rev); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { border: 1px solid var(--bd); padding: .35rem .5rem; text-align: right; }
+  th { background: var(--card); } th:first-child, td:first-child { text-align: left; }
+  td.bad { color: var(--bad); font-weight: 700; } td.ok { color: var(--ok); } td.rev { color: var(--rev); }
+  .duas { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .rolagem { max-height: 380px; overflow: auto; border: 1px solid var(--bd); border-radius: 8px; }
+  .rolagem table th { position: sticky; top: 0; }
+  .filtros { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: .5rem; align-items: center; }
+  select { padding: .3rem; background: var(--bg); color: var(--fg); border: 1px solid var(--bd); border-radius: 6px; }
+  .nota { color: var(--mut); font-size: .82rem; margin-top: .4rem; }
+  @media (max-width: 720px) { .controles, .duas, .cards { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <h1>Análise do modelo — ajustar ou não o parâmetro de laminação</h1>
+  <p class="sub">Classe 1 = <span id="rot1"></span> · Classe 0 = <span id="rot0"></span>. Dados do conjunto de <b>teste</b> embutidos neste arquivo (funciona offline).</p>
+
+  <h2>Métricas do modelo no corte do notebook</h2>
+  <div class="painel duas">
+    <div><table id="tab-metricas"></table></div>
+    <div><table id="tab-confusao"></table><p class="nota" id="nota-notebook"></p></div>
+  </div>
+
+  <h2>Ponto de corte e faixa de revisão humana</h2>
+  <div class="painel controles">
+    <div>
+      <label for="corte">Ponto de corte: <span class="valor" id="v-corte"></span></label>
+      <input id="corte" type="range" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div>
+      <label for="largura">Largura da faixa de revisão (± em torno do corte): <span class="valor" id="v-largura"></span></label>
+      <input id="largura" type="range" min="0" max="0.5" step="0.01" value="0.1">
+    </div>
+    <div>
+      <label for="rr">R = custo(FN) ÷ custo(FP)</label>
+      <input id="rr" type="number" min="0.1" step="0.5" value="3">
+    </div>
+  </div>
+  <p><button id="reset" type="button">Voltar aos valores do notebook</button></p>
+
+  <div class="cards">
+    <div class="card ajustar"><div class="n" id="n-ajustar">0</div><div class="l">ajustar automaticamente (<span id="p-ajustar"></span> a cada 100)</div></div>
+    <div class="card revisao"><div class="n" id="n-revisao">0</div><div class="l">enviados para revisão humana (<span id="p-revisao"></span> a cada 100)</div></div>
+    <div class="card nao"><div class="n" id="n-nao">0</div><div class="l">não ajustar automaticamente (<span id="p-nao"></span> a cada 100)</div></div>
+  </div>
+
+  <h2>Onde estão os erros (conforme os controles acima)</h2>
+  <div class="painel duas">
+    <div><table id="tab-matriz"></table></div>
+    <div id="resumo"></div>
+  </div>
+
+  <h2>Casos de teste</h2>
+  <div class="filtros">
+    <label>Decisão <select id="f-decisao">
+      <option value="todos">todas</option><option value="ajustar">ajustar</option>
+      <option value="revisao">revisão humana</option><option value="nao">não ajustar</option>
+      <option value="erros">somente erros automáticos</option></select></label>
+    <label>Defeito original <select id="f-defeito"><option value="todos">todos</option></select></label>
+    <span class="nota" id="contagem-tabela"></span>
+  </div>
+  <div class="rolagem"><table id="tab-casos"></table></div>
+
+<script>
+  const DADOS = __DADOS__;
+  const $ = (id) => document.getElementById(id);
+  const fmt = (x, d) => Number(x).toFixed(d === undefined ? 3 : d);
+  const por100 = (n, total) => (total ? (n / total * 100).toFixed(1) : "0.0");
+
+  // decide: "ajustar" | "nao" | "revisao" para uma probabilidade, um corte t e uma largura w
+  function decidir(p, t, w) {
+    if (p >= t + w) return "ajustar";
+    if (p < t - w) return "nao";
+    return "revisao";
+  }
+
+  function tabelaMetricas() {
+    const m = DADOS.metricas;
+    const linha = (nome, k) => "<tr><td>" + nome + "</td><td>" + fmt(m.treino[k]) + "</td><td>" + fmt(m.teste[k]) + "</td><td>" + fmt(m.treino[k] - m.teste[k]) + "</td></tr>";
+    $("tab-metricas").innerHTML = "<tr><th>métrica</th><th>treino</th><th>teste</th><th>lacuna</th></tr>" +
+      linha("acurácia", "acuracia") + linha("precisão", "precisao") + linha("recall", "recall");
+    const t = m.teste, r = m.treino;
+    $("tab-confusao").innerHTML = "<tr><th>matriz de confusão (teste)</th><th>previsto 0</th><th>previsto 1</th></tr>" +
+      "<tr><td>real 0</td><td>" + t.VN + "</td><td>" + t.FP + "</td></tr>" +
+      "<tr><td>real 1</td><td>" + t.FN + "</td><td>" + t.VP + "</td></tr>";
+    $("nota-notebook").textContent = "Corte do notebook: " + fmt(DADOS.corte, 2) + " · faixa ± " + fmt(DADOS.largura, 2) +
+      " · R = " + DADOS.R + ". Lacuna = treino − teste (sobreajuste).";
+  }
+
+  function atualizar() {
+    const t = parseFloat($("corte").value);
+    const w = parseFloat($("largura").value);
+    const R = parseFloat($("rr").value) || 1;
+    $("v-corte").textContent = t.toFixed(2);
+    $("v-largura").textContent = "± " + w.toFixed(2);
+
+    const total = DADOS.casos.length;
+    const cont = { ajustar: [0, 0], revisao: [0, 0], nao: [0, 0] };   // [real 0, real 1] por decisão
+    let vp = 0, fp = 0, fn = 0, vn = 0;
+    for (const c of DADOS.casos) {
+      cont[decidir(c.p, t, w)][c.real]++;
+      const prev = c.p >= t ? 1 : 0;                                   // decisão simples só pelo corte
+      if (prev === 1 && c.real === 1) vp++; else if (prev === 1) fp++; else if (c.real === 1) fn++; else vn++;
+    }
+    const nAj = cont.ajustar[0] + cont.ajustar[1], nRe = cont.revisao[0] + cont.revisao[1], nNa = cont.nao[0] + cont.nao[1];
+    $("n-ajustar").textContent = nAj; $("n-revisao").textContent = nRe; $("n-nao").textContent = nNa;
+    $("p-ajustar").textContent = por100(nAj, total); $("p-revisao").textContent = por100(nRe, total); $("p-nao").textContent = por100(nNa, total);
+
+    $("tab-matriz").innerHTML =
+      "<tr><th>real \\ decisão</th><th>ajustar (auto)</th><th>revisão humana</th><th>não ajustar (auto)</th></tr>" +
+      "<tr><td>real 0 (" + DADOS.rotulos["0"] + ")</td><td class='bad'>" + cont.ajustar[0] + " (FP)</td><td class='rev'>" + cont.revisao[0] + "</td><td class='ok'>" + cont.nao[0] + "</td></tr>" +
+      "<tr><td>real 1 (" + DADOS.rotulos["1"] + ")</td><td class='ok'>" + cont.ajustar[1] + "</td><td class='rev'>" + cont.revisao[1] + "</td><td class='bad'>" + cont.nao[1] + " (FN)</td></tr>";
+
+    const fpAuto = cont.ajustar[0], fnAuto = cont.nao[1];
+    const custoAuto = R * fnAuto + fpAuto;
+    const prec = (vp + fp) ? vp / (vp + fp) : 0, rec = (vp + fn) ? vp / (vp + fn) : 0, acc = (vp + vn + fp + fn) ? (vp + vn) / total : 0;
+    $("resumo").innerHTML =
+      "<p><b>Defeituosos liberados por engano (FN automático):</b> " + fnAuto + " — ajustes que deixaram de ser feitos.</p>" +
+      "<p><b>Ajustes desnecessários (FP automático):</b> " + fpAuto + ".</p>" +
+      "<p><b>Trabalho humano:</b> " + nRe + " casos (" + por100(nRe, total) + " a cada 100) vão para revisão.</p>" +
+      "<p><b>Custo dos erros automáticos:</b> " + custoAuto.toFixed(1) + " (= R·FN + FP; " + (custoAuto / total * 100).toFixed(1) + " por 100 casos, supondo revisão humana correta).</p>" +
+      "<p class='nota'>Sem faixa (só o corte): VP " + vp + " · FP " + fp + " · FN " + fn + " · VN " + vn +
+      " · acurácia " + fmt(acc) + " · precisão " + fmt(prec) + " · recall " + fmt(rec) + ".</p>";
+
+    tabelaCasos(t, w);
+  }
+
+  function tabelaCasos(t, w) {
+    const fd = $("f-decisao").value, ff = $("f-defeito").value;
+    const nomes = { ajustar: "ajustar", revisao: "revisão humana", nao: "não ajustar" };
+    let html = "<tr><th>#</th><th>defeito original</th><th>probabilidade</th><th>classe real</th><th>decisão</th><th>resultado</th></tr>";
+    let mostrados = 0;
+    DADOS.casos.forEach((c, i) => {
+      const d = decidir(c.p, t, w);
+      const erro = (d === "ajustar" && c.real === 0) || (d === "nao" && c.real === 1);
+      if (fd === "erros" ? !erro : (fd !== "todos" && d !== fd)) return;
+      if (ff !== "todos" && c.defeito !== ff) return;
+      const res = d === "revisao" ? "<td class='rev'>revisar</td>" : (erro ? "<td class='bad'>erro</td>" : "<td class='ok'>acerto</td>");
+      html += "<tr><td>" + (i + 1) + "</td><td>" + c.defeito + "</td><td>" + fmt(c.p) + "</td><td>" + c.real + "</td><td>" + nomes[d] + "</td>" + res + "</tr>";
+      mostrados++;
+    });
+    $("tab-casos").innerHTML = html;
+    $("contagem-tabela").textContent = mostrados + " de " + DADOS.casos.length + " casos";
+  }
+
+  function iniciar() {
+    $("rot1").textContent = DADOS.rotulos["1"]; $("rot0").textContent = DADOS.rotulos["0"];
+    const defeitos = Array.from(new Set(DADOS.casos.map((c) => c.defeito))).sort();
+    $("f-defeito").innerHTML = "<option value='todos'>todos</option>" + defeitos.map((d) => "<option>" + d + "</option>").join("");
+    tabelaMetricas();
+    const voltar = () => { $("corte").value = DADOS.corte; $("largura").value = DADOS.largura; $("rr").value = DADOS.R; atualizar(); };
+    ["corte", "largura", "rr"].forEach((id) => $(id).addEventListener("input", atualizar));
+    ["f-decisao", "f-defeito"].forEach((id) => $(id).addEventListener("change", atualizar));
+    $("reset").addEventListener("click", voltar);
+    voltar();
+  }
+  iniciar();
+</script>
+</body>
+</html>
